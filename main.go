@@ -109,6 +109,7 @@ func decode(fileName string) {
 		return
 	}
 
+	// decompress it
 	reader := bytes.NewReader([]byte(fileContent))
 	gzreader, err := gzip.NewReader(reader)
 	if err != nil {
