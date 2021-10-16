@@ -13,116 +13,103 @@ import (
 
 func main() {
 
-	// user : select encode or decode
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Decode or Encode (D/E) ?")
-	choice, err := reader.ReadString('\n')
-	if err != nil {
-		fmt.Println("Failed to read response: ", err)
-		return
-	}
-
-	var opFunc func(string)
-	var opStr string
-
-	switch choice[0] {
-	case 'e', 'E':
-		opFunc = encode
-		opStr = "encode"
-	case 'd', 'D':
-		opFunc = decode
-		opStr = "decode"
-	default:
-		fmt.Println("whatever.")
-		return
-	}
-
-	// user : enter a file name
-	fmt.Printf("File name to %s :", opStr)
-	fileName, err := reader.ReadString('\n')
-	fileName = strings.TrimSpace(fileName)
-
-	if err != nil {
-		fmt.Println("Failed to read file name:", err)
-		return
-	}
-
-	switch choice[0] {
-	case 'e', 'E':
-		opFunc(fileName)
-	default:
-		opFunc(fileName)
-	}
-}
-
-func encode(fileName string) {
-
 	// c:\temp\layout.json
 	// c:\temp\layout.json.encoded
 
-	fmt.Println("Encoding", fileName)
+	// user : enter a file name or a string to encode or decode
+	fmt.Print("Enter a file name or the text to encode/decode: ")
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
 
-	// read the file in
-	fileContent, err := os.ReadFile(fileName)
 	if err != nil {
-		fmt.Println("Failed to read file: ", err)
+		fmt.Println("Failed to read the input:", err)
 		return
 	}
 
+	// First we attempt to read input from a file, if that fails then treat the input as the actual text to encode or decode
+	var text []byte
+	fileContent, err := os.ReadFile(input)
+	if err != nil {
+		fmt.Println("\nTreating input as text")
+		text = []byte(input)
+	} else {
+		fmt.Print("\nTreated the input as a file name and read the contents:\n\n", string(fileContent), "\n\n")
+		text = fileContent
+	}
+
+	// Try to decode it
+	op := "decode"
+	result, err := decode(text)
+	if err != nil {
+		// The only option left is to encode it!
+		op = "encode"
+		result, err = encode(text)
+		if err != nil {
+			fmt.Println("Completely failed to do anything useful with that input")
+			return
+		}
+	}
+
+	fmt.Print("success!\n\n")
+
+	// output it
+	os.Stdout.Write([]byte(result))
+	fmt.Print("\n\n")
+
+	if len(fileContent) > 0 {
+		fileOut := input + "." + op + "d"
+		fmt.Print("Output also written to " + fileOut + "\n\n")
+		os.WriteFile(fileOut, []byte(result), os.FileMode(os.O_RDWR|os.O_CREATE|os.O_TRUNC))
+	}
+}
+
+func decode(text []byte) (result string, err error) {
+
+	fmt.Print("Attempting to decode the content... ")
+
+	// base64 decode it
+	textDecoded := make([]byte, len(text))
+	_, err = base64.RawStdEncoding.Decode(textDecoded, text)
+	if err != nil {
+		fmt.Print(err)
+		return
+	}
+
+	// decompress it
+	reader := bytes.NewReader(textDecoded)
+	gzreader, err := gzip.NewReader(reader)
+	gzreader.Multistream(false)
+	if err != nil {
+		fmt.Print("error at stage 1: " + err.Error())
+		return
+	}
+
+	resultBytes, err := ioutil.ReadAll(gzreader)
+	if err != nil {
+		fmt.Print("error at stage 2: " + err.Error())
+	}
+
+	result = string(resultBytes)
+	return
+}
+
+func encode(text []byte) (result string, err error) {
+
+	fmt.Print("\nAttempting to encode the content... ")
+
 	// compress it
 	buf := new(bytes.Buffer)
-
 	gz := gzip.NewWriter(buf)
-	_, err = gz.Write(fileContent)
+	_, err = gz.Write(text)
 	if err != nil {
-		fmt.Println("Failed to zip the file: ", err)
+		fmt.Print(err)
 		return
 	}
 	gz.Close()
 
 	// base64 encode it
-	result := base64.RawStdEncoding.EncodeToString(buf.Bytes())
+	result = base64.RawStdEncoding.EncodeToString(buf.Bytes())
 
-	// output it
-	os.Stdout.Write([]byte(result))
-	os.WriteFile(fileName+".encoded", []byte(result), os.FileMode(os.O_RDWR|os.O_CREATE|os.O_TRUNC))
-}
-
-func decode(fileName string) {
-
-	// c:\temp\layout.json
-	// c:\temp\layout.json.encoded
-
-	fmt.Println("Decoding", fileName)
-
-	// read the file in
-	fileContent, err := os.ReadFile(fileName)
-	if err != nil {
-		fmt.Println("Failed to read file: ", err)
-		return
-	}
-
-	// base64 decode it
-	_, err = base64.RawStdEncoding.Decode(fileContent, fileContent)
-	if err != nil {
-		fmt.Println("Failed to base64 decode file: ", err)
-		return
-	}
-
-	// decompress it
-	reader := bytes.NewReader([]byte(fileContent))
-	gzreader, err := gzip.NewReader(reader)
-	if err != nil {
-		fmt.Println("Failed to decompress file [stage 1]: ", err)
-		return
-	}
-
-	result, err := ioutil.ReadAll(gzreader)
-	if err != nil {
-		fmt.Println("Failed to decompress file [stage 2]: ", err)
-	}
-
-	// output it
-	os.Stdout.Write(result)
-	os.WriteFile(fileName+".decoded", []byte(result), os.FileMode(os.O_RDWR|os.O_CREATE|os.O_TRUNC))
+	return
 }
